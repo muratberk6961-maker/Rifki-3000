@@ -1,0 +1,18 @@
+name: XiaoZhi Kaynak Kontrol
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: XiaoZhi kodunu indir
+        uses: actions/checkout@v4
+        with:
+          repository: 78/xiaozhi-esp32
+
+      - name: Kontrol et
+        run: |
+          echo "XiaoZhi indirildi"
+          ls
