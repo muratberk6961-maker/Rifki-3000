@@ -1,4 +1,4 @@
-name: RIFKI v15.5 + Davranis Motoru + XiaoZhi ESP32-S3
+name: RIFKI v15.6 + Zeka Katmani + XiaoZhi ESP32-S3
 
 on:
   workflow_dispatch:
@@ -37,12 +37,12 @@ jobs:
         run: |
           python3 rifki_patch/patch_xiaozhi.py xiaozhi
 
-      - name: Davranis motorunu XiaoZhiye bagla
+      - name: RIFKI v15.6 zeka katmanini bagla
         shell: bash
         run: |
           cp rifki_repo/rifki_behavior_engine.h xiaozhi/main/rifki_behavior_engine.h
 
-          cat > /tmp/rifki_behavior_patch.py <<'PY'
+          cat > /tmp/rifki_v156_patch.py <<'PY'
           from pathlib import Path
 
           p = Path("xiaozhi/main/application.cc")
@@ -56,8 +56,102 @@ jobs:
                   raise SystemExit("RIFKI_INCLUDE_ANCHOR_NOT_FOUND")
               s = s.replace(include_anchor, include_anchor + include_line, 1)
 
-          start_marker = '        } else if (strcmp(type->valuestring, "llm") == 0) {'
-          end_marker = '        } else if (strcmp(type->valuestring, "mcp") == 0) {'
+          tag_anchor = '#define TAG "Application"\n'
+          helper_marker = 'static RifkiContext g_rifki_pending_context;'
+
+          if helper_marker not in s:
+              helper_lines = [
+                  '',
+                  'static RifkiContext g_rifki_pending_context;',
+                  '',
+                  'static std::string RifkiLowerAscii(std::string text) {',
+                  '    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) {',
+                  '        return static_cast<char>(std::tolower(c));',
+                  '    });',
+                  '    return text;',
+                  '}',
+                  '',
+                  'static bool RifkiContainsAny(const std::string& text,',
+                  '                             std::initializer_list<const char*> words) {',
+                  '    for (const char* word : words) {',
+                  '        if (text.find(word) != std::string::npos) {',
+                  '            return true;',
+                  '        }',
+                  '    }',
+                  '    return false;',
+                  '}',
+                  '',
+                  'static RifkiContext AnalyzeRifkiText(const std::string& raw) {',
+                  '    RifkiContext context;',
+                  '    const std::string text = RifkiLowerAscii(raw);',
+                  '',
+                  '    const bool explaining_word = RifkiContainsAny(',
+                  '        text, {" ne demek", " nedir", " anlami", " anlamı", " ornek", " örnek"});',
+                  '',
+                  '    const bool bad_word = RifkiContainsAny(',
+                  '        text, {"aptal", "salak", "gerizekali", "gerizekalı"});',
+                  '',
+                  '    const bool aimed_at_rifki = RifkiContainsAny(',
+                  '        text, {"sen ", "sana ", "seni ", "senin ", "rifki", "rıfkı"});',
+                  '',
+                  '    context.insult_or_swear =',
+                  '        bad_word && aimed_at_rifki && !explaining_word;',
+                  '',
+                  '    context.direct_attack = context.insult_or_swear;',
+                  '',
+                  '    context.joke = RifkiContainsAny(',
+                  '        text, {"saka", "şaka", "espri", "komik", "haha", "hehe"});',
+                  '',
+                  '    context.sad_topic = RifkiContainsAny(',
+                  '        text, {"uzgun", "üzgün", "agladim", "ağladım",',
+                  '               "moralim bozuk", "kotuyum", "kötüyüm"});',
+                  '',
+                  '    context.surprising = RifkiContainsAny(',
+                  '        text, {"vay", "inanamiyorum", "inanamıyorum",',
+                  '               "ciddi misin", "saka mi", "şaka mı"});',
+                  '',
+                  '    return context;',
+                  '}',
+                  '',
+              ]
+
+              if tag_anchor not in s:
+                  raise SystemExit("RIFKI_TAG_ANCHOR_NOT_FOUND")
+
+              s = s.replace(
+                  tag_anchor,
+                  tag_anchor + "\n".join(helper_lines),
+                  1
+              )
+
+          stt_anchor = '''        } else if (strcmp(type->valuestring, "stt") == 0) {
+              auto text = cJSON_GetObjectItem(root, "text");
+              if (cJSON_IsString(text)) {'''
+
+          stt_replacement = '''        } else if (strcmp(type->valuestring, "stt") == 0) {
+              auto text = cJSON_GetObjectItem(root, "text");
+              if (cJSON_IsString(text)) {
+                  g_rifki_pending_context =
+                      AnalyzeRifkiText(text->valuestring);'''
+
+          if stt_anchor not in s:
+              raise SystemExit("RIFKI_STT_ANCHOR_NOT_FOUND")
+
+          s = s.replace(
+              stt_anchor,
+              stt_replacement,
+              1
+          )
+
+          start_marker = (
+              '        } else if '
+              '(strcmp(type->valuestring, "llm") == 0) {'
+          )
+
+          end_marker = (
+              '        } else if '
+              '(strcmp(type->valuestring, "mcp") == 0) {'
+          )
 
           start = s.find(start_marker)
           end = s.find(end_marker, start)
@@ -69,56 +163,95 @@ jobs:
               '        } else if (strcmp(type->valuestring, "llm") == 0) {',
               '            auto emotion = cJSON_GetObjectItem(root, "emotion");',
               '            std::string emotion_str =',
-              '                cJSON_IsString(emotion) ? std::string(emotion->valuestring) : "neutral";',
+              '                cJSON_IsString(emotion)',
+              '                    ? std::string(emotion->valuestring)',
+              '                    : "neutral";',
+              '',
+              '            RifkiContext context = g_rifki_pending_context;',
               '',
               '            auto rifki = cJSON_GetObjectItem(root, "rifki");',
+              '',
               '            if (cJSON_IsObject(rifki)) {',
-              '                RifkiContext context;',
+              '                auto read_bool =',
+              '                    [rifki](const char* key, bool& target) {',
+              '                        auto item =',
+              '                            cJSON_GetObjectItem(rifki, key);',
               '',
-              '                auto read_bool = [rifki](const char* key, bool& target) {',
-              '                    auto item = cJSON_GetObjectItem(rifki, key);',
-              '                    if (cJSON_IsBool(item)) {',
-              '                        target = cJSON_IsTrue(item);',
-              '                    }',
-              '                };',
+              '                        if (cJSON_IsBool(item)) {',
+              '                            target = cJSON_IsTrue(item);',
+              '                        }',
+              '                    };',
               '',
-              '                read_bool("insult_or_swear", context.insult_or_swear);',
-              '                read_bool("direct_attack", context.direct_attack);',
+              '                read_bool(',
+              '                    "insult_or_swear",',
+              '                    context.insult_or_swear);',
+              '',
+              '                read_bool(',
+              '                    "direct_attack",',
+              '                    context.direct_attack);',
+              '',
               '                read_bool("joke", context.joke);',
               '                read_bool("sad_topic", context.sad_topic);',
               '                read_bool("surprising", context.surprising);',
-              '                read_bool("unknown_answer", context.unknown_answer);',
-              '                read_bool("needs_repeat", context.needs_repeat);',
               '',
-              '                auto speaker = cJSON_GetObjectItem(rifki, "speaker_name");',
+              '                read_bool(',
+              '                    "unknown_answer",',
+              '                    context.unknown_answer);',
+              '',
+              '                read_bool(',
+              '                    "needs_repeat",',
+              '                    context.needs_repeat);',
+              '',
+              '                auto speaker =',
+              '                    cJSON_GetObjectItem(',
+              '                        rifki, "speaker_name");',
+              '',
               '                if (cJSON_IsString(speaker)) {',
-              '                    context.speaker_name = speaker->valuestring;',
+              '                    context.speaker_name =',
+              '                        speaker->valuestring;',
               '                }',
-              '',
-              '                auto reaction = ChooseRifkiReaction(context);',
-              '                emotion_str = reaction.emotion_tag == "normal" ? "neutral" : reaction.emotion_tag;',
-              '',
-              '                ESP_LOGI(TAG, "RIFKI behavior: speaker=%s emotion=%s",',
-              '                         AddressSpeaker(context).c_str(), emotion_str.c_str());',
               '            }',
               '',
+              '            auto reaction =',
+              '                ChooseRifkiReaction(context);',
+              '',
+              '            if (reaction.emotion_tag != "normal") {',
+              '                emotion_str =',
+              '                    reaction.emotion_tag;',
+              '            }',
+              '',
+              '            ESP_LOGI(',
+              '                TAG,',
+              '                "RIFKI v15.6: speaker=%s emotion=%s",',
+              '                AddressSpeaker(context).c_str(),',
+              '                emotion_str.c_str());',
+              '',
+              '            g_rifki_pending_context =',
+              '                RifkiContext{};',
+              '',
               '            Schedule([display, emotion_str]() {',
-              '                display->SetEmotion(emotion_str.c_str());',
+              '                display->SetEmotion(',
+              '                    emotion_str.c_str());',
               '            });',
           ]
 
           new_block = "\n".join(new_lines) + "\n"
 
           s = s[:start] + new_block + s[end:]
-          p.write_text(s, encoding="utf-8")
 
-          print("RIFKI_BEHAVIOR_PATCH_APPLIED")
+          p.write_text(
+              s,
+              encoding="utf-8"
+          )
+
+          print("RIFKI_V15_6_PATCH_APPLIED")
           PY
 
-          python3 /tmp/rifki_behavior_patch.py
+          python3 /tmp/rifki_v156_patch.py
 
-          grep -q 'rifki_behavior_engine.h' xiaozhi/main/application.cc
+          grep -q 'AnalyzeRifkiText' xiaozhi/main/application.cc
           grep -q 'ChooseRifkiReaction' xiaozhi/main/application.cc
+          grep -q 'g_rifki_pending_context' xiaozhi/main/application.cc
 
       - name: ESP32-S3 derle
         shell: bash
@@ -128,16 +261,18 @@ jobs:
           idf.py set-target esp32s3
           idf.py build
 
-      - name: Tek RIFKI v15.5 firmware dosyasi olustur
+      - name: Tek RIFKI v15.6 firmware dosyasi olustur
         shell: bash
         run: |
           source "$IDF_PATH/export.sh"
           cd xiaozhi
-          idf.py merge-bin -o "$GITHUB_WORKSPACE/RIFKI_3000_v15_5_ESP32S3.bin" -f raw
+          idf.py merge-bin \
+            -o "$GITHUB_WORKSPACE/RIFKI_3000_v15_6_ESP32S3.bin" \
+            -f raw
 
       - name: Firmware dosyasini indirilebilir yap
         uses: actions/upload-artifact@v4
         with:
-          name: RIFKI_3000_v15_5_ESP32S3
-          path: RIFKI_3000_v15_5_ESP32S3.bin
+          name: RIFKI_3000_v15_6_ESP32S3
+          path: RIFKI_3000_v15_6_ESP32S3.bin
           if-no-files-found: error
