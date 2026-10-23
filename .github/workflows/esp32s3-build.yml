@@ -44,3 +44,16 @@ jobs:
           cd xiaozhi
           idf.py set-target esp32s3
           idf.py build
+      - name: Tek RIFKI firmware dosyasi olustur
+        shell: bash
+        run: |
+          source "$IDF_PATH/export.sh"
+          cd xiaozhi
+          idf.py merge-bin -o "$GITHUB_WORKSPACE/RIFKI_3000_v15_4_ESP32S3.bin" -f raw
+
+      - name: Firmware dosyasini indirilebilir yap
+        uses: actions/upload-artifact@v4
+        with:
+          name: RIFKI_3000_v15_4_ESP32S3
+          path: RIFKI_3000_v15_4_ESP32S3.bin
+          if-no-files-found: error
