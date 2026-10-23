@@ -1,4 +1,3 @@
-
 name: RIFKI v15.5 + Davranis Motoru + XiaoZhi ESP32-S3
 
 on:
@@ -43,7 +42,7 @@ jobs:
         run: |
           cp rifki_repo/rifki_behavior_engine.h xiaozhi/main/rifki_behavior_engine.h
 
-          python3 - <<'PY'
+          cat > /tmp/rifki_behavior_patch.py <<'PY'
           from pathlib import Path
 
           p = Path("xiaozhi/main/application.cc")
@@ -66,57 +65,57 @@ jobs:
           if start < 0 or end < 0:
               raise SystemExit("RIFKI_LLM_ANCHOR_NOT_FOUND")
 
-          new_block = '''        } else if (strcmp(type->valuestring, "llm") == 0) {
-              auto emotion = cJSON_GetObjectItem(root, "emotion");
-              std::string emotion_str =
-                  cJSON_IsString(emotion) ? std::string(emotion->valuestring) : "neutral";
+          new_lines = [
+              '        } else if (strcmp(type->valuestring, "llm") == 0) {',
+              '            auto emotion = cJSON_GetObjectItem(root, "emotion");',
+              '            std::string emotion_str =',
+              '                cJSON_IsString(emotion) ? std::string(emotion->valuestring) : "neutral";',
+              '',
+              '            auto rifki = cJSON_GetObjectItem(root, "rifki");',
+              '            if (cJSON_IsObject(rifki)) {',
+              '                RifkiContext context;',
+              '',
+              '                auto read_bool = [rifki](const char* key, bool& target) {',
+              '                    auto item = cJSON_GetObjectItem(rifki, key);',
+              '                    if (cJSON_IsBool(item)) {',
+              '                        target = cJSON_IsTrue(item);',
+              '                    }',
+              '                };',
+              '',
+              '                read_bool("insult_or_swear", context.insult_or_swear);',
+              '                read_bool("direct_attack", context.direct_attack);',
+              '                read_bool("joke", context.joke);',
+              '                read_bool("sad_topic", context.sad_topic);',
+              '                read_bool("surprising", context.surprising);',
+              '                read_bool("unknown_answer", context.unknown_answer);',
+              '                read_bool("needs_repeat", context.needs_repeat);',
+              '',
+              '                auto speaker = cJSON_GetObjectItem(rifki, "speaker_name");',
+              '                if (cJSON_IsString(speaker)) {',
+              '                    context.speaker_name = speaker->valuestring;',
+              '                }',
+              '',
+              '                auto reaction = ChooseRifkiReaction(context);',
+              '                emotion_str = reaction.emotion_tag == "normal" ? "neutral" : reaction.emotion_tag;',
+              '',
+              '                ESP_LOGI(TAG, "RIFKI behavior: speaker=%s emotion=%s",',
+              '                         AddressSpeaker(context).c_str(), emotion_str.c_str());',
+              '            }',
+              '',
+              '            Schedule([display, emotion_str]() {',
+              '                display->SetEmotion(emotion_str.c_str());',
+              '            });',
+          ]
 
-              auto rifki = cJSON_GetObjectItem(root, "rifki");
-              if (cJSON_IsObject(rifki)) {
-                  RifkiContext context;
+          new_block = "\n".join(new_lines) + "\n"
 
-                  auto read_bool = [rifki](const char* key, bool& target) {
-                      auto item = cJSON_GetObjectItem(rifki, key);
-                      if (cJSON_IsBool(item)) {
-                          target = cJSON_IsTrue(item);
-                      }
-                  };
-
-                  read_bool("insult_or_swear", context.insult_or_swear);
-                  read_bool("direct_attack", context.direct_attack);
-                  read_bool("joke", context.joke);
-                  read_bool("sad_topic", context.sad_topic);
-                  read_bool("surprising", context.surprising);
-                  read_bool("unknown_answer", context.unknown_answer);
-                  read_bool("needs_repeat", context.needs_repeat);
-
-                  auto speaker = cJSON_GetObjectItem(rifki, "speaker_name");
-                  if (cJSON_IsString(speaker)) {
-                      context.speaker_name = speaker->valuestring;
-                  }
-
-                  auto reaction = ChooseRifkiReaction(context);
-
-                  emotion_str =
-                      reaction.emotion_tag == "normal"
-                          ? "neutral"
-                          : reaction.emotion_tag;
-
-                  ESP_LOGI(TAG,
-                           "RIFKI behavior: speaker=%s emotion=%s",
-                           AddressSpeaker(context).c_str(),
-                           emotion_str.c_str());
-              }
-
-              Schedule([display, emotion_str]() {
-                  display->SetEmotion(emotion_str.c_str());
-              });
-'''
           s = s[:start] + new_block + s[end:]
           p.write_text(s, encoding="utf-8")
 
           print("RIFKI_BEHAVIOR_PATCH_APPLIED")
           PY
+
+          python3 /tmp/rifki_behavior_patch.py
 
           grep -q 'rifki_behavior_engine.h' xiaozhi/main/application.cc
           grep -q 'ChooseRifkiReaction' xiaozhi/main/application.cc
