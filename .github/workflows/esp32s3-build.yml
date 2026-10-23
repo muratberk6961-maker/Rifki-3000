@@ -2,6 +2,7 @@ name: XiaoZhi ESP32-S3 Gercek Derleme
 
 on:
   workflow_dispatch:
+  push:
 
 jobs:
   build:
