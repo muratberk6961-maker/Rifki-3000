@@ -48,13 +48,40 @@ jobs:
           p = Path("xiaozhi/main/application.cc")
           s = p.read_text(encoding="utf-8")
 
-          include_anchor = '#include "mcp_server.h"\n'
-          include_line = '#include "rifki_behavior_engine.h"\n'
+          # -------------------------------------------------
+          # RIFKI davranis motoru include
+          # -------------------------------------------------
 
-          if include_line not in s:
+          include_anchor = '#include "mcp_server.h"\n'
+          rifki_include = '#include "rifki_behavior_engine.h"\n'
+
+          if rifki_include not in s:
               if include_anchor not in s:
                   raise SystemExit("RIFKI_INCLUDE_ANCHOR_NOT_FOUND")
-              s = s.replace(include_anchor, include_anchor + include_line, 1)
+
+              s = s.replace(
+                  include_anchor,
+                  include_anchor + rifki_include,
+                  1
+              )
+
+          # initializer_list icin gerekli
+          std_anchor = '#include <algorithm>\n'
+          std_include = '#include <initializer_list>\n'
+
+          if std_include not in s:
+              if std_anchor not in s:
+                  raise SystemExit("RIFKI_STD_INCLUDE_ANCHOR_NOT_FOUND")
+
+              s = s.replace(
+                  std_anchor,
+                  std_anchor + std_include,
+                  1
+              )
+
+          # -------------------------------------------------
+          # Yerel RIFKI metin analiz katmani
+          # -------------------------------------------------
 
           tag_anchor = '#define TAG "Application"\n'
           helper_marker = 'static RifkiContext g_rifki_pending_context;'
@@ -65,50 +92,71 @@ jobs:
                   'static RifkiContext g_rifki_pending_context;',
                   '',
                   'static std::string RifkiLowerAscii(std::string text) {',
-                  '    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) {',
-                  '        return static_cast<char>(std::tolower(c));',
-                  '    });',
+                  '    for (char& c : text) {',
+                  "        if (c >= 'A' && c <= 'Z') {",
+                  "            c = static_cast<char>(c - 'A' + 'a');",
+                  '        }',
+                  '    }',
                   '    return text;',
                   '}',
                   '',
-                  'static bool RifkiContainsAny(const std::string& text,',
-                  '                             std::initializer_list<const char*> words) {',
+                  'static bool RifkiContainsAny(',
+                  '    const std::string& text,',
+                  '    std::initializer_list<const char*> words) {',
+                  '',
                   '    for (const char* word : words) {',
                   '        if (text.find(word) != std::string::npos) {',
                   '            return true;',
                   '        }',
                   '    }',
+                  '',
                   '    return false;',
                   '}',
                   '',
-                  'static RifkiContext AnalyzeRifkiText(const std::string& raw) {',
+                  'static RifkiContext AnalyzeRifkiText(',
+                  '    const std::string& raw) {',
+                  '',
                   '    RifkiContext context;',
                   '    const std::string text = RifkiLowerAscii(raw);',
                   '',
                   '    const bool explaining_word = RifkiContainsAny(',
-                  '        text, {" ne demek", " nedir", " anlami", " anlamı", " ornek", " örnek"});',
+                  '        text,',
+                  '        {" ne demek", " nedir", " anlami", " anlamı",',
+                  '         " ornek", " örnek"});',
                   '',
                   '    const bool bad_word = RifkiContainsAny(',
-                  '        text, {"aptal", "salak", "gerizekali", "gerizekalı"});',
+                  '        text,',
+                  '        {"aptal", "salak", "gerizekali", "gerizekalı"});',
                   '',
                   '    const bool aimed_at_rifki = RifkiContainsAny(',
-                  '        text, {"sen ", "sana ", "seni ", "senin ", "rifki", "rıfkı"});',
+                  '        text,',
+                  '        {"sen ", "sana ", "seni ", "senin ",',
+                  '         "rifki", "rıfkı"});',
                   '',
                   '    context.insult_or_swear =',
                   '        bad_word && aimed_at_rifki && !explaining_word;',
                   '',
-                  '    context.direct_attack = context.insult_or_swear;',
+                  '    context.direct_attack =',
+                  '        context.insult_or_swear;',
                   '',
                   '    context.joke = RifkiContainsAny(',
-                  '        text, {"saka", "şaka", "espri", "komik", "haha", "hehe"});',
+                  '        text,',
+                  '        {"saka", "şaka", "espri",',
+                  '         "komik", "haha", "hehe"});',
                   '',
                   '    context.sad_topic = RifkiContainsAny(',
-                  '        text, {"uzgun", "üzgün", "agladim", "ağladım",',
-                  '               "moralim bozuk", "kotuyum", "kötüyüm"});',
+                  '        text,',
+                  '        {"uzgun", "üzgün",',
+                  '         "agladim", "ağladım",',
+                  '         "moralim bozuk",',
+                  '         "kotuyum", "kötüyüm"});',
                   '',
                   '    context.surprising = RifkiContainsAny(',
-                  '        text, {"vay", "inanamiyorum", "inanamıyorum",',
-                  '               "ciddi misin", "saka mi", "şaka mı"});',
+                  '        text,',
+                  '        {"vay",',
+                  '         "inanamiyorum", "inanamıyorum",',
+                  '         "ciddi misin",',
+                  '         "saka mi", "şaka mı"});',
                   '',
                   '    return context;',
                   '}',
@@ -124,61 +172,105 @@ jobs:
                   1
               )
 
-          stt_anchor = '''        } else if (strcmp(type->valuestring, "stt") == 0) {
-              auto text = cJSON_GetObjectItem(root, "text");
-              if (cJSON_IsString(text)) {'''
+          # -------------------------------------------------
+          # STT: Kullanici cumlesini yerel analiz et
+          # -------------------------------------------------
 
-          stt_replacement = '''        } else if (strcmp(type->valuestring, "stt") == 0) {
-              auto text = cJSON_GetObjectItem(root, "text");
-              if (cJSON_IsString(text)) {
-                  g_rifki_pending_context =
-                      AnalyzeRifkiText(text->valuestring);'''
-
-          if stt_anchor not in s:
-              raise SystemExit("RIFKI_STT_ANCHOR_NOT_FOUND")
-
-          s = s.replace(
-              stt_anchor,
-              stt_replacement,
-              1
+          stt_marker = (
+              '        } else if '
+              '(strcmp(type->valuestring, "stt") == 0) {'
           )
 
-          start_marker = (
+          llm_marker = (
               '        } else if '
               '(strcmp(type->valuestring, "llm") == 0) {'
           )
 
-          end_marker = (
+          stt_start = s.find(stt_marker)
+
+          if stt_start < 0:
+              raise SystemExit("RIFKI_STT_ANCHOR_NOT_FOUND")
+
+          stt_end = s.find(llm_marker, stt_start)
+
+          if stt_end < 0:
+              raise SystemExit("RIFKI_STT_END_NOT_FOUND")
+
+          stt_section = s[stt_start:stt_end]
+
+          analyze_call = (
+              '                g_rifki_pending_context =\n'
+              '                    AnalyzeRifkiText(text->valuestring);\n'
+          )
+
+          if 'AnalyzeRifkiText(text->valuestring);' not in stt_section:
+              text_if_marker = (
+                  '            if (cJSON_IsString(text)) {'
+              )
+
+              text_if = s.find(
+                  text_if_marker,
+                  stt_start,
+                  stt_end
+              )
+
+              if text_if < 0:
+                  raise SystemExit("RIFKI_STT_TEXT_NOT_FOUND")
+
+              insert_at = text_if + len(text_if_marker)
+
+              s = (
+                  s[:insert_at]
+                  + '\n'
+                  + analyze_call
+                  + s[insert_at:]
+              )
+
+          # -------------------------------------------------
+          # LLM: Yerel analiz + sunucu RIFKI bilgisi
+          # -------------------------------------------------
+
+          llm_start = s.find(llm_marker)
+
+          mcp_marker = (
               '        } else if '
               '(strcmp(type->valuestring, "mcp") == 0) {'
           )
 
-          start = s.find(start_marker)
-          end = s.find(end_marker, start)
+          llm_end = s.find(mcp_marker, llm_start)
 
-          if start < 0 or end < 0:
+          if llm_start < 0 or llm_end < 0:
               raise SystemExit("RIFKI_LLM_ANCHOR_NOT_FOUND")
 
-          new_lines = [
+          new_llm_lines = [
               '        } else if (strcmp(type->valuestring, "llm") == 0) {',
-              '            auto emotion = cJSON_GetObjectItem(root, "emotion");',
+              '            auto emotion =',
+              '                cJSON_GetObjectItem(root, "emotion");',
+              '',
               '            std::string emotion_str =',
               '                cJSON_IsString(emotion)',
               '                    ? std::string(emotion->valuestring)',
               '                    : "neutral";',
               '',
-              '            RifkiContext context = g_rifki_pending_context;',
+              '            RifkiContext context =',
+              '                g_rifki_pending_context;',
               '',
-              '            auto rifki = cJSON_GetObjectItem(root, "rifki");',
+              '            auto rifki =',
+              '                cJSON_GetObjectItem(root, "rifki");',
               '',
               '            if (cJSON_IsObject(rifki)) {',
               '                auto read_bool =',
-              '                    [rifki](const char* key, bool& target) {',
+              '                    [rifki](',
+              '                        const char* key,',
+              '                        bool& target) {',
+              '',
               '                        auto item =',
-              '                            cJSON_GetObjectItem(rifki, key);',
+              '                            cJSON_GetObjectItem(',
+              '                                rifki, key);',
               '',
               '                        if (cJSON_IsBool(item)) {',
-              '                            target = cJSON_IsTrue(item);',
+              '                            target =',
+              '                                cJSON_IsTrue(item);',
               '                        }',
               '                    };',
               '',
@@ -190,9 +282,17 @@ jobs:
               '                    "direct_attack",',
               '                    context.direct_attack);',
               '',
-              '                read_bool("joke", context.joke);',
-              '                read_bool("sad_topic", context.sad_topic);',
-              '                read_bool("surprising", context.surprising);',
+              '                read_bool(',
+              '                    "joke",',
+              '                    context.joke);',
+              '',
+              '                read_bool(',
+              '                    "sad_topic",',
+              '                    context.sad_topic);',
+              '',
+              '                read_bool(',
+              '                    "surprising",',
+              '                    context.surprising);',
               '',
               '                read_bool(',
               '                    "unknown_answer",',
@@ -204,7 +304,8 @@ jobs:
               '',
               '                auto speaker =',
               '                    cJSON_GetObjectItem(',
-              '                        rifki, "speaker_name");',
+              '                        rifki,',
+              '                        "speaker_name");',
               '',
               '                if (cJSON_IsString(speaker)) {',
               '                    context.speaker_name =',
@@ -235,9 +336,20 @@ jobs:
               '            });',
           ]
 
-          new_block = "\n".join(new_lines) + "\n"
+          new_llm_block = (
+              "\n".join(new_llm_lines)
+              + "\n"
+          )
 
-          s = s[:start] + new_block + s[end:]
+          s = (
+              s[:llm_start]
+              + new_llm_block
+              + s[llm_end:]
+          )
+
+          # -------------------------------------------------
+          # Son kontrol
+          # -------------------------------------------------
 
           p.write_text(
               s,
