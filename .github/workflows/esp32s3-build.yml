@@ -1,4 +1,5 @@
-name: RIFKI v15.4 + XiaoZhi ESP32-S3 Entegrasyon
+
+name: RIFKI v15.5 + Davranis Motoru + XiaoZhi ESP32-S3
 
 on:
   workflow_dispatch:
@@ -27,7 +28,7 @@ jobs:
         run: |
           python3 -m zipfile -e rifki_repo/RIFKI_3000_v15_4_Kaynak_Kontrolu.zip rifki_patch
 
-      - name: Uyumlulugu kontrol et
+      - name: RIFKI yuz uyumlulugunu kontrol et
         shell: bash
         run: |
           python3 rifki_patch/patch_xiaozhi.py --check xiaozhi
@@ -37,6 +38,89 @@ jobs:
         run: |
           python3 rifki_patch/patch_xiaozhi.py xiaozhi
 
+      - name: Davranis motorunu XiaoZhiye bagla
+        shell: bash
+        run: |
+          cp rifki_repo/rifki_behavior_engine.h xiaozhi/main/rifki_behavior_engine.h
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("xiaozhi/main/application.cc")
+          s = p.read_text(encoding="utf-8")
+
+          include_anchor = '#include "mcp_server.h"\n'
+          include_line = '#include "rifki_behavior_engine.h"\n'
+
+          if include_line not in s:
+              if include_anchor not in s:
+                  raise SystemExit("RIFKI_INCLUDE_ANCHOR_NOT_FOUND")
+              s = s.replace(include_anchor, include_anchor + include_line, 1)
+
+          start_marker = '        } else if (strcmp(type->valuestring, "llm") == 0) {'
+          end_marker = '        } else if (strcmp(type->valuestring, "mcp") == 0) {'
+
+          start = s.find(start_marker)
+          end = s.find(end_marker, start)
+
+          if start < 0 or end < 0:
+              raise SystemExit("RIFKI_LLM_ANCHOR_NOT_FOUND")
+
+          new_block = '''        } else if (strcmp(type->valuestring, "llm") == 0) {
+              auto emotion = cJSON_GetObjectItem(root, "emotion");
+              std::string emotion_str =
+                  cJSON_IsString(emotion) ? std::string(emotion->valuestring) : "neutral";
+
+              auto rifki = cJSON_GetObjectItem(root, "rifki");
+              if (cJSON_IsObject(rifki)) {
+                  RifkiContext context;
+
+                  auto read_bool = [rifki](const char* key, bool& target) {
+                      auto item = cJSON_GetObjectItem(rifki, key);
+                      if (cJSON_IsBool(item)) {
+                          target = cJSON_IsTrue(item);
+                      }
+                  };
+
+                  read_bool("insult_or_swear", context.insult_or_swear);
+                  read_bool("direct_attack", context.direct_attack);
+                  read_bool("joke", context.joke);
+                  read_bool("sad_topic", context.sad_topic);
+                  read_bool("surprising", context.surprising);
+                  read_bool("unknown_answer", context.unknown_answer);
+                  read_bool("needs_repeat", context.needs_repeat);
+
+                  auto speaker = cJSON_GetObjectItem(rifki, "speaker_name");
+                  if (cJSON_IsString(speaker)) {
+                      context.speaker_name = speaker->valuestring;
+                  }
+
+                  auto reaction = ChooseRifkiReaction(context);
+
+                  emotion_str =
+                      reaction.emotion_tag == "normal"
+                          ? "neutral"
+                          : reaction.emotion_tag;
+
+                  ESP_LOGI(TAG,
+                           "RIFKI behavior: speaker=%s emotion=%s",
+                           AddressSpeaker(context).c_str(),
+                           emotion_str.c_str());
+              }
+
+              Schedule([display, emotion_str]() {
+                  display->SetEmotion(emotion_str.c_str());
+              });
+'''
+          s = s[:start] + new_block + s[end:]
+          p.write_text(s, encoding="utf-8")
+
+          print("RIFKI_BEHAVIOR_PATCH_APPLIED")
+          PY
+
+          grep -q 'rifki_behavior_engine.h' xiaozhi/main/application.cc
+          grep -q 'ChooseRifkiReaction' xiaozhi/main/application.cc
+
       - name: ESP32-S3 derle
         shell: bash
         run: |
@@ -44,16 +128,17 @@ jobs:
           cd xiaozhi
           idf.py set-target esp32s3
           idf.py build
-      - name: Tek RIFKI firmware dosyasi olustur
+
+      - name: Tek RIFKI v15.5 firmware dosyasi olustur
         shell: bash
         run: |
           source "$IDF_PATH/export.sh"
           cd xiaozhi
-          idf.py merge-bin -o "$GITHUB_WORKSPACE/RIFKI_3000_v15_4_ESP32S3.bin" -f raw
+          idf.py merge-bin -o "$GITHUB_WORKSPACE/RIFKI_3000_v15_5_ESP32S3.bin" -f raw
 
       - name: Firmware dosyasini indirilebilir yap
         uses: actions/upload-artifact@v4
         with:
-          name: RIFKI_3000_v15_4_ESP32S3
-          path: RIFKI_3000_v15_4_ESP32S3.bin
+          name: RIFKI_3000_v15_5_ESP32S3
+          path: RIFKI_3000_v15_5_ESP32S3.bin
           if-no-files-found: error
